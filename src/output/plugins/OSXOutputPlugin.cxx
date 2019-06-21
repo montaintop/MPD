@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2018 The Music Player Daemon Project
+ * Copyright 2003-2019 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -26,7 +26,7 @@
 #include "util/Domain.hxx"
 #include "util/Manual.hxx"
 #include "util/ConstBuffer.hxx"
-#include "pcm/PcmExport.hxx"
+#include "pcm/Export.hxx"
 #include "thread/Mutex.hxx"
 #include "thread/Cond.hxx"
 #include "util/ByteOrder.hxx"
@@ -763,7 +763,6 @@ OSXOutput::Open(AudioFormat &audio_format)
 	PcmExport::Params params;
 	params.alsa_channel_order = true;
 	bool dop = dop_setting;
-	params.dop = false;
 #endif
 
 	memset(&asbd, 0, sizeof(asbd));
@@ -788,7 +787,7 @@ OSXOutput::Open(AudioFormat &audio_format)
 #ifdef ENABLE_DSD
 	if (dop && audio_format.format == SampleFormat::DSD) {
 		asbd.mBitsPerChannel = 24;
-		params.dop = true;
+		params.dsd_mode = PcmExport::DsdMode::DOP;
 		asbd.mSampleRate = params.CalcOutputSampleRate(audio_format.sample_rate);
 		asbd.mBytesPerPacket = 4 * audio_format.channels;
 
@@ -803,14 +802,14 @@ OSXOutput::Open(AudioFormat &audio_format)
 
 #ifdef ENABLE_DSD
 	if(audio_format.format == SampleFormat::DSD && sample_rate != asbd.mSampleRate) { // fall back to PCM in case sample_rate cannot be synchronized
-		params.dop = false;
+		params.dsd_mode = PcmExport::DsdMode::NONE;
 		audio_format.format = SampleFormat::S32;
 		asbd.mBitsPerChannel = 32;
 		asbd.mBytesPerPacket = audio_format.GetFrameSize();
 		asbd.mSampleRate = params.CalcOutputSampleRate(audio_format.sample_rate);
 		asbd.mBytesPerFrame = asbd.mBytesPerPacket;
 	}
-	dop_enabled = params.dop;
+	dop_enabled = params.dsd_mode == PcmExport::DsdMode::DOP;
 #endif
 
 	OSStatus status =
@@ -887,13 +886,7 @@ OSXOutput::Play(const void *chunk, size_t size)
 #ifdef ENABLE_DSD
         if (dop_enabled) {
 		const auto e = pcm_export->Export({chunk, size});
-		/* the DoP (DSD over PCM) filter converts two frames
-		   at a time and ignores the last odd frame; if there
-		   was only one frame (e.g. the last frame in the
-		   file), the result is empty; to avoid an endless
-		   loop, bail out here, and pretend the one frame has
-		   been played */
-		if (e.size == 0)
+		if (e.empty())
 			return size;
 
 		size_t bytes_written = ring_buffer->push((const uint8_t *)e.data, e.size);

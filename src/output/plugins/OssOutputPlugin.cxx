@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2018 The Music Player Daemon Project
+ * Copyright 2003-2019 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -54,7 +54,7 @@
 #endif
 
 #ifdef AFMT_S24_PACKED
-#include "pcm/PcmExport.hxx"
+#include "pcm/Export.hxx"
 #include "util/Manual.hxx"
 #endif
 
@@ -670,11 +670,12 @@ OssOutput::Play(const void *chunk, size_t size)
 
 #ifdef AFMT_S24_PACKED
 	const auto e = pcm_export->Export({chunk, size});
+	if (e.empty())
+		return size;
+
 	chunk = e.data;
 	size = e.size;
 #endif
-
-	assert(size > 0);
 
 	while (true) {
 		ret = fd.Write(chunk, size);

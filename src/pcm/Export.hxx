@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2018 The Music Player Daemon Project
+ * Copyright 2003-2019 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -21,8 +21,16 @@
 #define PCM_EXPORT_HXX
 
 #include "SampleFormat.hxx"
-#include "PcmBuffer.hxx"
+#include "Buffer.hxx"
 #include "config.h"
+
+#ifdef ENABLE_DSD
+#include "Dsd16.hxx"
+#include "Dsd32.hxx"
+#include "Dop.hxx"
+#endif
+
+#include <stdint.h>
 
 template<typename T> struct ConstBuffer;
 struct AudioFormat;
@@ -30,7 +38,7 @@ struct AudioFormat;
 /**
  * An object that handles export of PCM samples to some instance
  * outside of MPD.  It has a few more options to tweak the binary
- * representation which are not supported by the pcm_convert library.
+ * representation which are not supported by the #PcmConvert library.
  */
 class PcmExport {
 	/**
@@ -42,12 +50,19 @@ class PcmExport {
 
 #ifdef ENABLE_DSD
 	/**
-	 * The buffer is used to convert DSD samples to the
-	 * DoP format.
-	 *
-	 * @see #dop
+	 * @see DsdMode::U16
 	 */
-	PcmBuffer dop_buffer;
+	Dsd16Converter dsd16_converter;
+
+	/**
+	 * @see DsdMode::U32
+	 */
+	Dsd32Converter dsd32_converter;
+
+	/**
+	 * @see DsdMode::DOP
+	 */
+	DsdToDopConverter dop_converter;
 #endif
 
 	/**
@@ -80,22 +95,30 @@ class PcmExport {
 	SampleFormat alsa_channel_order;
 
 #ifdef ENABLE_DSD
-	/**
-	 * Convert DSD (U8) to DSD_U16?
-	 */
-	bool dsd_u16;
+public:
+	enum class DsdMode : uint8_t {
+		NONE,
 
-	/**
-	 * Convert DSD (U8) to DSD_U32?
-	 */
-	bool dsd_u32;
+		/**
+		 * Convert DSD (U8) to DSD_U16?
+		 */
+		U16,
 
-	/**
-	 * Convert DSD to DSD-over-PCM (DoP)?  Input format must be
-	 * SampleFormat::DSD and output format must be
-	 * SampleFormat::S24_P32.
-	 */
-	bool dop;
+		/**
+		 * Convert DSD (U8) to DSD_U32?
+		 */
+		U32,
+
+		/**
+		 * Convert DSD to DSD-over-PCM (DoP)?  Input format
+		 * must be SampleFormat::DSD and output format must be
+		 * SampleFormat::S24_P32.
+		 */
+		DOP,
+	};
+
+private:
+	DsdMode dsd_mode;
 #endif
 
 	/**
@@ -120,9 +143,7 @@ public:
 	struct Params {
 		bool alsa_channel_order = false;
 #ifdef ENABLE_DSD
-		bool dsd_u16 = false;
-		bool dsd_u32 = false;
-		bool dop = false;
+		DsdMode dsd_mode = DsdMode::NONE;
 #endif
 		bool shift8 = false;
 		bool pack24 = false;
@@ -160,8 +181,7 @@ public:
 	/**
 	 * Reset the filter's state, e.g. drop/flush buffers.
 	 */
-	void Reset() noexcept {
-	}
+	void Reset() noexcept;
 
 	/**
 	 * Calculate the size of one output frame.
@@ -173,12 +193,13 @@ public:
 	 * Export a PCM buffer.
 	 *
 	 * @param src the source PCM buffer
-	 * @return the destination buffer (may be a pointer to the source buffer)
+	 * @return the destination buffer; may be empty (and may be a
+	 * pointer to the source buffer)
 	 */
 	ConstBuffer<void> Export(ConstBuffer<void> src) noexcept;
 
 	/**
-	 * Converts the number of consumed bytes from the pcm_export()
+	 * Converts the number of consumed bytes from the Export()
 	 * destination buffer to the according number of bytes from the
 	 * pcm_export() source buffer.
 	 */
